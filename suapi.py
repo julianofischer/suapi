@@ -1,8 +1,9 @@
-ximport requests, gspread
+#!/bin/python3
+import requests, gspread
 from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
-from conf import username_suap as username
-from conf import password_suap as pwd
+from conf import suap_username as username
+from conf import suap_password as pwd
 from conf import spreadsheet_url
 
 #criar projeto em https://console.developers.google.com/cloud-resource-manager
@@ -76,11 +77,12 @@ def get_csrftoken(session):
 
 # tenta fazer login e retorna um objeto do tipo Session (requests)
 def login():
+    global username, pwd
     if username is None:
         username = input("Digite o nome de usuário do SUAP:")
 
     if pwd is None:
-        import from getpass import getpass
+        from getpass import getpass
         pwd = getpass()
 
     payload = {'username' : username, 'password': pwd}
@@ -88,20 +90,19 @@ def login():
     s = requests.Session()
     s.get("https://suap.ifro.edu.br/accounts/login/")
 
-    csrftoken = get_csrftoken()
-
+    csrftoken = get_csrftoken(s)
     payload['csrfmiddlewaretoken'] = csrftoken
     r = s.post("https://suap.ifro.edu.br/accounts/login/", data=payload)
 
     if r.status_code != 200:
         print("erro ao fazer login")
         print(r.status_code)
-       return None
+        return None
     else:
        return s
 
 def busca_diarios(session):
-    r = s.get("https://suap.ifro.edu.br/edu/meus_diarios/")
+    r = session.get("https://suap.ifro.edu.br/edu/meus_diarios/")
     soup = BeautifulSoup(r.text, 'html.parser')
     tables = []
     for index, table in enumerate(soup.find_all('table', {"class":"marginBottom20"})):
@@ -112,7 +113,8 @@ def busca_diarios(session):
     return tables
 
 def parse_id_diario(diario):
-    url = diario[url]
+    global url
+    url = diario['url']
     id_diario = url.split("meu_diario/")[1].split("/")[0]
     return id_diario
 
@@ -120,12 +122,13 @@ def parse_id_diario(diario):
 def consulta_qual_diario(diarios):
     print("--- Escolha o diário que você quer atualizar ---")
     for diario in diarios:
-    print(f"{diario['index']}: {diario['caption']}")
+        print(f"{diario['index']}: {diario['caption']}")
     escolha = int(input("Escolha: "))
     id_diario = parse_id_diario(diarios[escolha])
     return id_diario
 
 def init_gspread():
+    global spreadsheet_url
     gc = gspread.service_account()
     if spreadsheet_url is None:
         spreadsheet_url = input("Digite a URL da planilha")
@@ -135,7 +138,7 @@ def init_gspread():
 
 #pega a primeira planilha e retorna os dados mapeados em um dict
 def select_worksheet(sheet, index=0):
-    worksheet = sh.get_worksheet(index)
+    worksheet = sheet.get_worksheet(index)
     data = worksheet.get_all_values()
     data = map_data(data)
     return data
@@ -155,9 +158,10 @@ q:
 aula_form
 '''
 
-def map_data_to_payload(data, csrftoken, professor_diario):
+def map_data_to_payload(data, professor_diario, csrftoken = None):
     payload = {}
-    payload['middlewaretoken'] = csrftoken
+    if csrftoken:
+        payload['csrfmiddlewaretoken'] = csrftoken
     payload['professor_diario'] = professor_diario
     payload['tipo_frequencia'] = get_tipo_freq_code(data[LBL_TIPO_FREQ])
     payload['quantidade_aula_teorica'] = data[LBL_QTDD_TEORICA]
@@ -166,25 +170,54 @@ def map_data_to_payload(data, csrftoken, professor_diario):
     payload['etapa'] = 1
     payload['data'] = data[LBL_DATE]
     payload['horario_inicio'] = get_hour_code(data[LBL_INICIO])
-    payload['conteudo'] = conteudo
+    payload['conteudo'] = data[LBL_CONTEUDO]
     payload['q']=''
-    payload['aula_form']=''
+    payload['aula_form']='Aguarde...'
     return payload
 
 def adiciona_aula(id_diario, data, session):
+    d = {'Host': 'suap.ifro.edu.br',
+         'Connection': 'keep-alive',
+         'Content-Length': '277',
+         'Cache-Control': 'max-age=0',
+         'Upgrade-Insecure-Requests': '1',
+         'Origin': 'https://suap.ifro.edu.br',
+         'Content-Type': 'application/x-www-form-urlencoded',
+         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.97 Safari/537.36',
+         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+         'Sec-Fetch-Site': 'same-origin',
+         'Sec-Fetch-Mode': 'navigate',
+         'Sec-Fetch-User': '?1',
+         'Sec-Fetch-Dest': 'document',
+         'Referer': f'https://suap.ifro.edu.br/edu/adicionar_aula_diario/{id_diario}/1/?_popup=1',
+         'Accept-Encoding': 'gzip, deflate, br',
+         'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',}
     url = f"https://suap.ifro.edu.br/edu/adicionar_aula_diario/{id_diario}/1/"
-    csrftoken = get_csrftoken()
     r = session.get(url)
+    csrftoken = get_csrftoken(session)
+    #print(r.text)
     soup = BeautifulSoup(r.text, 'html.parser')
-    professor_diario = soup.find("input", {'id':'id_professor_diario'})
-    payload = map_data_to_payload(data, crsftoken, professor_diario)
-    r.post(data=payload)
+    professor_diario = soup.find("input", {'id':'id_professor_diario'})['value']
+    payload = map_data_to_payload(data, professor_diario, csrftoken)
+    print(payload)
+    #print("Publicando aula {}".format(payload))
+    #print(session.cookies.get_dict())
+    #r = session.post(url, data=payload, headers=session.headers.update({'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9'}))
+    r = session.post(url, data=payload, allow_redirects=True) 
+    print(r.request.headers)
+    print(r.status_code)
+    print(r.request)
 
 def main():
     session = login()
+    print(session)
     diarios = busca_diarios(session)
     id_diario = consulta_qual_diario(diarios)
     sheet = init_gspread()
     data = select_worksheet(sheet)
     for line in data:
         adiciona_aula(id_diario, line, session)
+
+if __name__ == "__main__":
+    main()
+
