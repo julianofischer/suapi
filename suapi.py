@@ -2,14 +2,14 @@
 import requests, gspread
 from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
-from conf import suap_username as username
-from conf import suap_password as pwd
-from conf import spreadsheet_url
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
-#criar projeto em https://console.developers.google.com/cloud-resource-manager
-#procurar por google drive api e ativar
-#procurar por google sheet api e ativar
-#instruções: https://gspread.readthedocs.io/en/latest/oauth2.html
+username = os.getenv("SUAP_USERNAME")
+pwd = os.getenv("SUAP_PASSWORD")
+spreadsheet_url = os.getenv("SPREADSHEET_URL")
+
 LBL_DATE = "data"
 LBL_QTDD_PRATICA = "quantidade aulas práticas"
 LBL_QTDD_TEORICA = "quantidade aulas teóricas"
@@ -43,6 +43,7 @@ def get_tipo_freq_code(tipo_frequencia):
     elif tipo_frequencia == 'Não Presencial':
         return 1
 
+
 # retorna o código do horário de início da aula
 def get_hour_code(hour):
     return HOUR[hour]
@@ -53,6 +54,7 @@ def get_hour_code(hour):
 def filter_data(line):
     #0: data
     return line[LBL_DATE] and not line[LBL_UPDATED]
+
 
 def map_data(data):
     new_list = []
@@ -101,6 +103,7 @@ def login():
     else:
        return s
 
+
 def busca_diarios(session):
     r = session.get("https://suap.ifro.edu.br/edu/meus_diarios/")
     soup = BeautifulSoup(r.text, 'html.parser')
@@ -118,6 +121,7 @@ def parse_id_diario(diario):
     id_diario = url.split("meu_diario/")[1].split("/")[0]
     return id_diario
 
+
 # consulta o usuário sobre qual diário quer atualizar e retorna o id do dirio
 def consulta_qual_diario(diarios):
     print("--- Escolha o diário que você quer atualizar ---")
@@ -127,14 +131,16 @@ def consulta_qual_diario(diarios):
     id_diario = parse_id_diario(diarios[escolha])
     return id_diario
 
+
 def init_gspread():
     global spreadsheet_url
-    gc = gspread.service_account()
+    gc = gspread.service_account(filename='./service_account.json')
     if spreadsheet_url is None:
         spreadsheet_url = input("Digite a URL da planilha")
 
     sh = gc.open_by_url(spreadsheet_url)
     return sh
+
 
 #pega a primeira planilha e retorna os dados mapeados em um dict
 def select_worksheet(sheet, index=0):
@@ -157,6 +163,7 @@ conteudo: Preenchimento posterior.
 q: 
 aula_form
 '''
+
 
 def map_data_to_payload(data, professor_diario, csrftoken = None):
     payload = {}
